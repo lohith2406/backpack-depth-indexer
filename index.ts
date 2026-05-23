@@ -26,14 +26,14 @@ const buffer: Buffer[] = [];
 
 function updateOrderbook(updatedAsks: Levels, updatedBids: Levels) {
     updatedAsks.forEach(([price, qty]: [string, string]) => {
-        if (qty === "0") {
+        if (Number(qty) === 0) {
             delete orderbook.asks[price];
             return;
         }
         orderbook.asks[price] = qty;
     })
     updatedBids.forEach(([price, qty]: [string, string]) => {
-        if (qty === "0") {
+        if (Number(qty) === 0) {
             delete orderbook.bids[price];
             return;
         }
@@ -43,10 +43,10 @@ function updateOrderbook(updatedAsks: Levels, updatedBids: Levels) {
 
 ws.onmessage = (msg) => {
     const parsedMessage = JSON.parse(msg.data);
-    const updatedBids = parsedMessage.b;
-    const updatedAsks = parsedMessage.a;
-    const firstUpdateId = parsedMessage.U;
-    const lastUpdateId = parsedMessage.u;
+    const updatedBids = parsedMessage.data.b;
+    const updatedAsks = parsedMessage.data.a;
+    const firstUpdateId = parsedMessage.data.U;
+    const lastUpdateId = parsedMessage.data.u;
 
     if (!isOrderbookInitialized) {
         buffer.push({updatedBids, updatedAsks, firstUpdateId, lastUpdateId})
@@ -60,11 +60,27 @@ ws.onopen = async () => {
     const res = await axios.get("https://api.backpack.exchange/api/v1/depth?symbol=SOL_USDC");
     const { bids, asks, lastUpdateId } = res.data;
     updateOrderbook(asks, bids);
+
+    let foundStartingPoint = false;
+    const nextExpectedUpdate = lastUpdateId + 1;
     buffer.forEach((msg) => {
-        if (msg.lastUpdateId > lastUpdateId) {
+        const overlapsSnapshot = msg.firstUpdateId <= nextExpectedUpdate && msg.lastUpdateId >= nextExpectedUpdate;
+
+        if (overlapsSnapshot) {
+            foundStartingPoint = true;
+        }
+
+        if (foundStartingPoint) {
             updateOrderbook(msg.updatedAsks, msg.updatedBids);
         }
     })
 
     isOrderbookInitialized = true;
 }
+
+setInterval(() => {
+    const bestAsk = Object.keys(orderbook.asks).sort((a,b) => Number(a) - Number(b))[0];
+    const bestBid = Object.keys(orderbook.bids).sort((a,b) => Number(b) - Number(a))[0];
+    console.log(`best ask: ${bestAsk}`);
+    console.log(`best bid: ${bestBid}`);
+}, 5000)
